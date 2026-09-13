@@ -1,4 +1,5 @@
 import { execFile } from 'child_process';
+import { randomUUID } from 'crypto';
 import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -275,7 +276,10 @@ export class OmniFocus {
   `;
 
   private async executeJXA(script: string, timeoutMs = 30000): Promise<string> {
-    const tmpFile = join(tmpdir(), `omnifocus-${Date.now()}.js`);
+    // Must be unique per call: the MCP server runs tool calls concurrently, and
+    // two scripts written to the same timestamp-named file would silently run
+    // whichever one landed last (e.g. a delete executing a list script).
+    const tmpFile = join(tmpdir(), `omnifocus-${process.pid}-${randomUUID()}.js`);
 
     try {
       await writeFile(tmpFile, script, 'utf-8');
