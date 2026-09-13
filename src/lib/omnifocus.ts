@@ -86,12 +86,32 @@ export class OmniFocus {
     }
 
     function findTask(idOrName) {
+      const matches = [];
       for (const task of flattenedTasks) {
-        if (task.id.primaryKey === idOrName || task.name === idOrName) {
+        if (task.id.primaryKey === idOrName) {
           return task;
         }
+        if (task.name === idOrName) {
+          matches.push(task);
+        }
       }
-      throw new Error("Task not found: " + idOrName);
+
+      if (matches.length === 0) {
+        throw new Error("Task not found: " + idOrName);
+      }
+
+      if (matches.length > 1) {
+        const where = matches.map(t => {
+          const parent = t.parent && !t.parent.project ? t.parent : null;
+          const loc = parent
+            ? "in group " + parent.name
+            : t.containingProject ? "in project " + t.containingProject.name : "in inbox";
+          return t.id.primaryKey + " (" + loc + (t.completed ? ", completed" : "") + ")";
+        });
+        throw new Error("Multiple tasks found with name '" + idOrName + "'. Use the task ID:\\n  " + where.join('\\n  '));
+      }
+
+      return matches[0];
     }
 
     function findProject(idOrName) {

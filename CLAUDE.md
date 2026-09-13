@@ -120,7 +120,10 @@ with children or a project root task (`task.project` is non-null) unless `force`
 ## Task/Project Identification
 
 Both `findTask()` and `findProject()` JXA helpers accept:
-- Primary key ID (e.g., "kXu3B-LZfFH")
+- Primary key ID (e.g., "kXu3B-LZfFH") — always wins
 - Exact name match
 
-Commands use "idOrName" pattern for flexible lookups.
+Commands use "idOrName" pattern for flexible lookups. `findTask()` requires an exact-name
+match to be unique across `flattenedTasks` (which includes completed tasks); otherwise it
+throws "Multiple tasks found ..." listing each ID with its location, which `handleError`
+maps to a 400.
