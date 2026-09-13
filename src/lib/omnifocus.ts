@@ -3,6 +3,7 @@ import { writeFile, unlink } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { promisify } from 'util';
+import { OmniFocusCliError } from './errors.js';
 import type {
   Task,
   Project,
@@ -36,6 +37,10 @@ export class OmniFocus {
   private readonly OMNI_HELPERS = `
     function serializeTask(task) {
       const containingProject = task.containingProject;
+      // A project's top-level tasks have the project's root task as their
+      // parent; that's not a user-facing action group, so skip it.
+      const parent = task.parent && !task.parent.project ? task.parent : null;
+      const children = task.hasChildren ? task.children : [];
       const tagNames = task.tags.map(t => t.name);
 
       return {
@@ -47,6 +52,10 @@ export class OmniFocus {
         effectivelyActive: task.effectiveActive,
         flagged: task.flagged,
         project: containingProject ? containingProject.name : null,
+        parentId: parent ? parent.id.primaryKey : null,
+        parent: parent ? parent.name : null,
+        childCount: children.length,
+        remainingChildCount: children.filter(c => !c.completed && c.effectiveActive).length,
         tags: tagNames,
         defer: task.deferDate ? task.deferDate.toISOString() : null,
         due: task.dueDate ? task.dueDate.toISOString() : null,
@@ -387,6 +396,22 @@ export class OmniFocus {
         moveTasks([task], targetProject);
       `);
     }
+    if (options.parent !== undefined) {
+      updates.push(
+        options.parent
+          ? `
+        const parentTask = findTask("${this.escapeString(options.parent)}");
+        for (let p = parentTask; p; p = p.parent) {
+          if (p.id.primaryKey === task.id.primaryKey) {
+            throw new Error("Cannot move '" + task.name + "' under itself or its own descendant");
+          }
+        }
+        moveTasks([task], parentTask.ending);
+      `
+          : // Un-nest: back to the top level of its project, or the inbox.
+            'moveTasks([task], task.containingProject ? task.containingProject.ending : inbox.ending);'
+      );
+    }
     if (options.tags !== undefined) {
       updates.push(`replaceTagsOn(task, ${JSON.stringify(options.tags)});`);
     }
@@ -436,11 +461,14 @@ export class OmniFocus {
   }
 
   async listTasks(filters: TaskFilters = {}): Promise<Task[]> {
+    const source = filters.parent
+      ? `findTask("${this.escapeString(filters.parent)}").children`
+      : 'flattenedTasks';
     const omniScript = `
       ${this.OMNI_HELPERS}
       (() => {
         const results = [];
-        for (const task of flattenedTasks) {
+        for (const task of ${source}) {
           ${this.buildTaskFilters(filters)}
           results.push(serializeTask(task));
         }
@@ -453,14 +481,20 @@ export class OmniFocus {
   }
 
   async createTask(options: CreateTaskOptions): Promise<Task> {
+    if (options.project && options.parent) {
+      throw new OmniFocusCliError('Specify either project or parent, not both', 400);
+    }
     const omniScript = `
       ${this.OMNI_HELPERS}
       (() => {
         ${
-          options.project
-            ? `const targetProject = findByName(flattenedProjects, "${this.escapeString(options.project)}", "Project");
+          options.parent
+            ? `const parentTask = findTask("${this.escapeString(options.parent)}");
+             const task = new Task("${this.escapeString(options.name)}", parentTask.ending);`
+            : options.project
+              ? `const targetProject = findByName(flattenedProjects, "${this.escapeString(options.project)}", "Project");
              const task = new Task("${this.escapeString(options.name)}", targetProject);`
-            : `const task = new Task("${this.escapeString(options.name)}");`
+              : `const task = new Task("${this.escapeString(options.name)}");`
         }
 
         ${options.note ? `task.note = "${this.escapeString(options.note)}";` : ''}
@@ -479,6 +513,9 @@ export class OmniFocus {
   }
 
   async updateTask(idOrName: string, options: UpdateTaskOptions): Promise<Task> {
+    if (options.project && options.parent) {
+      throw new OmniFocusCliError('Specify either project or parent, not both', 400);
+    }
     const omniScript = `
       ${this.OMNI_HELPERS}
       (() => {
@@ -492,11 +529,22 @@ export class OmniFocus {
     return JSON.parse(output);
   }
 
-  async deleteTask(idOrName: string): Promise<void> {
+  async deleteTask(idOrName: string, options: { force?: boolean } = {}): Promise<void> {
     const omniScript = `
       ${this.OMNI_HELPERS}
       (() => {
-        deleteObject(findTask("${this.escapeString(idOrName)}"));
+        const task = findTask("${this.escapeString(idOrName)}");
+        ${
+          options.force
+            ? ''
+            : `if (task.project) {
+          throw new Error("Refusing to delete '" + task.name + "': it is the root task of project '" + task.project.name + "' and deleting it deletes the whole project. Pass --force / force: true to delete anyway.");
+        }
+        if (task.hasChildren) {
+          throw new Error("Refusing to delete '" + task.name + "': it has " + task.children.length + " child task(s) that would be deleted with it. Pass --force / force: true to delete anyway.");
+        }`
+        }
+        deleteObject(task);
       })();
     `;
 
@@ -569,12 +617,32 @@ export class OmniFocus {
     await this.executeJXA(this.wrapOmniScript(omniScript));
   }
 
-  async listInboxTasks(): Promise<Task[]> {
-    return this.getPerspectiveTasks('Inbox');
+  async listInboxTasks(options: { includeChildren?: boolean } = {}): Promise<Task[]> {
+    const omniScript = `
+      ${this.OMNI_HELPERS}
+      (() => {
+        const source = [];
+        for (const task of inbox) {
+          source.push(task);
+          ${options.includeChildren ? 'for (const child of task.flattenedChildren) source.push(child);' : ''}
+        }
+
+        const results = [];
+        for (const task of source) {
+          if (task.completed) continue;
+          if (!task.effectiveActive) continue;
+          results.push(serializeTask(task));
+        }
+        return JSON.stringify(results);
+      })();
+    `;
+
+    const output = await this.executeJXA(this.wrapOmniScript(omniScript));
+    return JSON.parse(output);
   }
 
   async getInboxCount(): Promise<number> {
-    const tasks = await this.getPerspectiveTasks('Inbox');
+    const tasks = await this.listInboxTasks();
     return tasks.length;
   }
 

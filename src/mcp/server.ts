@@ -4,15 +4,15 @@ import { z } from 'zod';
 import { OmniFocus } from '../lib/omnifocus.js';
 
 const toolRegistry = [
-  { name: 'list_tasks', description: 'List tasks with optional filtering' },
+  { name: 'list_tasks', description: 'List tasks with optional filtering, or the children of an action group' },
   { name: 'get_task', description: 'Get a specific task by ID or name' },
-  { name: 'create_task', description: 'Create a new task' },
-  { name: 'update_task', description: 'Update an existing task' },
-  { name: 'delete_task', description: 'Delete a task' },
+  { name: 'create_task', description: 'Create a new task, optionally nested under a parent task' },
+  { name: 'update_task', description: 'Update an existing task, including moving it under or out of a parent' },
+  { name: 'delete_task', description: 'Delete a task (refuses action groups and project roots unless force)' },
   { name: 'search_tasks', description: 'Search tasks by name or note content' },
   { name: 'get_task_stats', description: 'Get task statistics' },
-  { name: 'list_inbox', description: 'List all inbox tasks' },
-  { name: 'get_inbox_count', description: 'Get the number of inbox tasks' },
+  { name: 'list_inbox', description: 'List inbox tasks (top-level; action groups carry childCount)' },
+  { name: 'get_inbox_count', description: 'Get the number of top-level inbox tasks' },
   { name: 'list_projects', description: 'List projects with optional filtering' },
   { name: 'get_project', description: 'Get a specific project by ID or name' },
   { name: 'create_project', description: 'Create a new project' },
@@ -44,13 +44,17 @@ function jsonResponse(data: unknown) {
 
 server.tool(
   'list_tasks',
-  'List tasks with optional filtering',
+  'List tasks with optional filtering, or the direct children of an action group',
   {
     includeCompleted: z.boolean().optional().describe('Include completed tasks'),
     includeDropped: z.boolean().optional().describe('Include dropped tasks'),
     flagged: z.boolean().optional().describe('Only show flagged tasks'),
     project: z.string().optional().describe('Filter by project name'),
     tag: z.string().optional().describe('Filter by tag name'),
+    parent: z
+      .string()
+      .optional()
+      .describe('List the direct children of this task (action group), by ID or name'),
   },
   async (filters) => jsonResponse(await of.listTasks(filters))
 );
@@ -69,6 +73,10 @@ server.tool(
     name: z.string().describe('Task name'),
     note: z.string().optional().describe('Task note'),
     project: z.string().optional().describe('Project to add task to'),
+    parent: z
+      .string()
+      .optional()
+      .describe('Parent task (action group) ID or name to nest under; mutually exclusive with project'),
     tags: z.array(z.string()).optional().describe('Tags to assign'),
     defer: z.string().optional().describe('Defer date (ISO 8601)'),
     due: z.string().optional().describe('Due date (ISO 8601)'),
@@ -86,6 +94,13 @@ server.tool(
     name: z.string().optional().describe('New task name'),
     note: z.string().optional().describe('New task note'),
     project: z.string().optional().describe('Move to project'),
+    parent: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        'Move under this task (action group) by ID or name; null to un-nest to the top level of its project or the inbox'
+      ),
     tags: z.array(z.string()).optional().describe('Replace tags'),
     defer: z.string().optional().describe('New defer date (ISO 8601)'),
     due: z.string().optional().describe('New due date (ISO 8601)'),
@@ -99,10 +114,13 @@ server.tool(
 
 server.tool(
   'delete_task',
-  'Delete a task',
-  { idOrName: z.string().describe('Task ID or name') },
-  async ({ idOrName }) => {
-    await of.deleteTask(idOrName);
+  'Delete a task. Refuses to delete an action group (task with children) or a project root task unless force is true, because that cascades to everything under it.',
+  {
+    idOrName: z.string().describe('Task ID or name'),
+    force: z.boolean().optional().describe('Delete even if it has children or is a project root task'),
+  },
+  async ({ idOrName, force }) => {
+    await of.deleteTask(idOrName, { force });
     return jsonResponse({ deleted: true });
   }
 );
@@ -116,9 +134,19 @@ server.tool(
 
 server.tool('get_task_stats', 'Get task statistics', {}, async () => jsonResponse(await of.getTaskStats()));
 
-server.tool('list_inbox', 'List all inbox tasks', {}, async () => jsonResponse(await of.listInboxTasks()));
+server.tool(
+  'list_inbox',
+  'List inbox tasks. Top-level items only by default; action groups carry childCount/remainingChildCount, and their children are available via list_tasks with parent.',
+  {
+    includeChildren: z
+      .boolean()
+      .optional()
+      .describe('Also include descendants of action groups, flat, each with parentId'),
+  },
+  async ({ includeChildren }) => jsonResponse(await of.listInboxTasks({ includeChildren }))
+);
 
-server.tool('get_inbox_count', 'Get the number of inbox tasks', {}, async () =>
+server.tool('get_inbox_count', 'Get the number of top-level inbox tasks', {}, async () =>
   jsonResponse({ count: await of.getInboxCount() })
 );
 

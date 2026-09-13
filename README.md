@@ -32,9 +32,11 @@ of task list --flagged              # Flagged tasks only
 of task list --project "Work"       # Filter by project
 of task list --tag "urgent"         # Filter by tag
 of task list --completed            # Include completed
+of task list --parent "Work"        # Direct children of a task (action group)
 
 of task create "Name" [options]
   --project <name>                  # Assign to project
+  --parent <name|id>                # Nest under a task (action group); not with --project
   --tag <tags...>                   # Add tags
   --due <YYYY-MM-DD>                # Set due date
   --defer <YYYY-MM-DD>              # Set defer date
@@ -47,11 +49,17 @@ of task update <name|id> [options]
   --drop / --undrop                 # Mark dropped/restore to active
   --flag / --unflag                 # Toggle flag
   --name <new-name>                 # Rename
+  --parent <name|id>                # Move under a task (action group)
+  --no-parent                       # Un-nest to the top level of its project or the inbox
   --project/--tag/--due/--defer     # Same as create
 
 of task view <name|id>              # View details
 of task delete <name|id>            # Delete task
+of task delete <name|id> --force    # Also delete an action group or project root (cascades)
 ```
+
+`task delete` refuses to delete a task that has children, or a project's root task, unless
+`--force` is given — either would silently delete everything under it.
 
 ### Projects
 
@@ -94,9 +102,11 @@ of tag delete <name>                # Delete tag
 ### Inbox
 
 ```bash
-of inbox list                       # List inbox items
-of inbox count                      # Inbox count
+of inbox list                       # Top-level inbox items (groups carry childCount)
+of inbox list --all                 # Include children of action groups, flat
+of inbox count                      # Top-level inbox count
 of inbox add "Task name"            # Add task to inbox
+of inbox add "Task name" --parent "Work"   # Add under an inbox action group
 ```
 
 ### Perspectives
@@ -153,8 +163,14 @@ of task list --flagged | jq '.[] | {name, due}'  # Specific fields
   "id": "kXu3B-LZfFH",
   "name": "Task name",
   "completed": false,
+  "dropped": false,
+  "effectivelyActive": true,
   "flagged": true,
   "project": "Project Name",
+  "parentId": "aBcDeFgHiJk",
+  "parent": "Parent task name",
+  "childCount": 0,
+  "remainingChildCount": 0,
   "tags": ["tag1", "tag2"],
   "due": "2024-01-15T00:00:00.000Z",
   "defer": null,
@@ -171,6 +187,14 @@ of task list --flagged | jq '.[] | {name, due}'  # Specific fields
 **Permission denied**: Grant automation permission in System Settings > Privacy & Security > Automation.
 
 **Task not found**: Use exact name or ID. IDs appear in JSON output.
+
+**Multiple tasks found**: several tasks share that exact name; the error lists each ID with its
+location. Use the ID.
+
+**Refusing to delete**: the task has children or is a project's root task. Pass `--force` to delete
+it and everything under it.
+
+**Cannot move under itself**: a task can't be nested under itself or one of its own descendants.
 
 **Date format**: Use ISO format `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM:SS`.
 

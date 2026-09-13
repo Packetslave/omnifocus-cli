@@ -11,11 +11,12 @@ export function createInboxCommand(): Command {
   command
     .command('list')
     .alias('ls')
-    .description('List inbox tasks')
+    .description('List inbox tasks (top-level; action groups carry childCount)')
+    .option('-a, --all', 'Include children of action groups (flat, each with parentId)')
     .action(
-      withErrorHandling(async () => {
+      withErrorHandling(async (options) => {
         const of = new OmniFocus();
-        const tasks = await of.listInboxTasks();
+        const tasks = await of.listInboxTasks({ includeChildren: options.all });
         outputJson(tasks);
       })
     );
@@ -34,6 +35,7 @@ export function createInboxCommand(): Command {
   command
     .command('add <name>')
     .description('Add a task to inbox')
+    .option('--parent <idOrName>', 'Nest under an inbox task (action group)')
     .option('--note <text>', 'Add note')
     .option('-t, --tag <tags...>', 'Add tags')
     .option('-d, --due <date>', 'Set due date')
@@ -46,6 +48,7 @@ export function createInboxCommand(): Command {
         const task = await of.createTask({
           name,
           note: options.note,
+          parent: options.parent,
           tags: options.tag,
           due: options.due ? parseDateTime(options.due) : undefined,
           defer: options.defer ? parseDateTime(options.defer) : undefined,

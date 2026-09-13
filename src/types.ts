@@ -7,6 +7,10 @@ export interface Task {
   effectivelyActive: boolean;
   flagged: boolean;
   project: string | null;
+  parentId: string | null;
+  parent: string | null;
+  childCount: number;
+  remainingChildCount: number;
   tags: string[];
   defer: string | null;
   due: string | null;
@@ -34,6 +38,7 @@ export interface TaskFilters {
   flagged?: boolean;
   project?: string;
   tag?: string;
+  parent?: string;
 }
 
 export interface ProjectFilters {
@@ -46,6 +51,7 @@ export interface CreateTaskOptions {
   name: string;
   note?: string;
   project?: string;
+  parent?: string;
   tags?: string[];
   defer?: string;
   due?: string;
@@ -57,6 +63,7 @@ export interface UpdateTaskOptions {
   name?: string;
   note?: string;
   project?: string;
+  parent?: string | null;
   tags?: string[];
   defer?: string;
   due?: string;

@@ -86,6 +86,16 @@ Commands use `withErrorHandling()` HOF which:
 3. Collects Task objects from the tree nodes
 4. Uses 60s timeout (longer than default 30s) due to perspective switching delay
 
+`listInboxTasks()` does not go through this path: it reads the `inbox` collection directly
+(top-level items, plus `flattenedChildren` when `includeChildren` is set), so it needs no
+window and does not change the front window's perspective.
+
+### Task Hierarchy
+Tasks carry `parentId`/`parent`/`childCount`/`remainingChildCount`. A project's top-level
+tasks have the project's root task as their Omni Automation `parent`; `serializeTask` reports
+that as `parent: null` (only action groups count as parents). `deleteTask` refuses a task
+with children or a project root task (`task.project` is non-null) unless `force` is set.
+
 ## Important Constraints
 
 - **macOS Only**: Uses osascript which is macOS-specific

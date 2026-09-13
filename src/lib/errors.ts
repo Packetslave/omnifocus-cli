@@ -25,7 +25,11 @@ export function handleError(error: unknown): void {
 
     if (detail.includes('not found')) {
       statusCode = 404;
-    } else if (detail.includes('Multiple')) {
+    } else if (
+      detail.includes('Multiple') ||
+      detail.includes('Refusing to delete') ||
+      detail.includes('Cannot move')
+    ) {
       statusCode = 400;
     }
   }

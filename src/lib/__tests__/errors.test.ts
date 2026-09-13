@@ -24,7 +24,13 @@ interface HandleErrorResult {
 }
 
 async function runHandleError(
-  scenario: 'omnifocus_cli_error' | 'error_not_found' | 'error_multiple' | 'error_plain' | 'non_error'
+  scenario:
+    | 'omnifocus_cli_error'
+    | 'error_not_found'
+    | 'error_multiple'
+    | 'error_refusing'
+    | 'error_plain'
+    | 'non_error'
 ): Promise<HandleErrorResult> {
   const tmp = await mkdtemp(join(tmpdir(), 'of-errors-test-'));
   const script = join(tmp, 'run.mjs');
@@ -44,6 +50,9 @@ switch (${JSON.stringify(scenario)}) {
     break;
   case 'error_multiple':
     error = new Error('Multiple matches for "foo"');
+    break;
+  case 'error_refusing':
+    error = new Error("Refusing to delete 'x': it has 2 child task(s)");
     break;
   case 'error_plain':
     error = new Error('boom');
@@ -112,6 +121,17 @@ describe('handleError', () => {
       error: {
         name: 'omnifocus_error',
         detail: 'Multiple matches for "foo"',
+        statusCode: 400,
+      },
+    });
+  });
+
+  it('maps delete-guard refusals to 400', async () => {
+    const { stdout } = await runHandleError('error_refusing');
+    expect(JSON.parse(stdout)).toEqual({
+      error: {
+        name: 'omnifocus_error',
+        detail: "Refusing to delete 'x': it has 2 child task(s)",
         statusCode: 400,
       },
     });

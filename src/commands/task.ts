@@ -17,6 +17,7 @@ export function createTaskCommand(): Command {
     .option('-p, --project <name>', 'Filter by project')
     .option('-t, --tag <name>', 'Filter by tag')
     .option('-c, --completed', 'Include completed tasks')
+    .option('--parent <idOrName>', 'List direct children of a task (action group)')
     .action(
       withErrorHandling(async (options) => {
         const of = new OmniFocus();
@@ -25,6 +26,7 @@ export function createTaskCommand(): Command {
           ...(options.flagged && { flagged: true }),
           ...(options.project && { project: options.project }),
           ...(options.tag && { tag: options.tag }),
+          ...(options.parent && { parent: options.parent }),
         };
         const tasks = await of.listTasks(filters);
         outputJson(tasks);
@@ -35,6 +37,7 @@ export function createTaskCommand(): Command {
     .command('create <name>')
     .description('Create a new task')
     .option('-p, --project <name>', 'Assign to project')
+    .option('--parent <idOrName>', 'Nest under a task (action group)')
     .option('--note <text>', 'Add note')
     .option('-t, --tag <tags...>', 'Add tags')
     .option('-d, --due <date>', 'Set due date')
@@ -48,6 +51,7 @@ export function createTaskCommand(): Command {
           name,
           note: options.note,
           project: options.project,
+          parent: options.parent,
           tags: options.tag,
           due: options.due ? parseDateTime(options.due) : undefined,
           defer: options.defer ? parseDateTime(options.defer) : undefined,
@@ -64,6 +68,8 @@ export function createTaskCommand(): Command {
     .option('-n, --name <name>', 'New name')
     .option('--note <text>', 'New note')
     .option('-p, --project <name>', 'Move to project')
+    .option('--parent <idOrName>', 'Move under a task (action group)')
+    .option('--no-parent', 'Un-nest: move to the top level of its project or the inbox')
     .option('-t, --tag <tags...>', 'Replace tags')
     .option('-d, --due <date>', 'Set due date')
     .option('-D, --defer <date>', 'Set defer date')
@@ -81,6 +87,8 @@ export function createTaskCommand(): Command {
           ...(options.name && { name: options.name }),
           ...(options.note !== undefined && { note: options.note }),
           ...(options.project && { project: options.project }),
+          // --parent <x> → string; --no-parent → false (un-nest); neither → undefined
+          ...(options.parent !== undefined && { parent: options.parent || null }),
           ...(options.tag && { tags: options.tag }),
           ...(options.due !== undefined && {
             due: options.due ? parseDateTime(options.due) : null,
@@ -105,10 +113,11 @@ export function createTaskCommand(): Command {
     .command('delete <idOrName>')
     .alias('rm')
     .description('Delete a task')
+    .option('--force', 'Delete even if the task has children or is a project root task')
     .action(
-      withErrorHandling(async (idOrName) => {
+      withErrorHandling(async (idOrName, options) => {
         const of = new OmniFocus();
-        await of.deleteTask(idOrName);
+        await of.deleteTask(idOrName, { force: options.force });
         outputJson({ message: 'Task deleted successfully' });
       })
     );
